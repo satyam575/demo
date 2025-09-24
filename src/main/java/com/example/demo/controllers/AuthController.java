@@ -6,6 +6,8 @@ import com.example.demo.auth.util.EmailUtil;
 import com.example.demo.auth.vendor.Msg91OtpClient;
 import com.example.demo.models.User;
 import com.example.demo.services.UserService;
+import com.example.demo.services.WeddingService;
+import com.example.demo.services.S3Service;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +25,8 @@ public class AuthController {
     private final Msg91OtpClient msg91OtpClient;
     private final UserService userService;
     private final JwtIssuer jwtIssuer;
+    private final WeddingService weddingService;
+    private final S3Service s3Service;
 
     @PostMapping("/otp/request")
     public Mono<ResponseEntity<?>> requestOtp(@Valid @RequestBody OtpRequestDto request) {
@@ -73,9 +77,8 @@ public class AuthController {
                             User user = userService.upsertUserByEmail(normalizedEmail);
                             boolean isNewUser = userService.isNewUserByEmail(normalizedEmail);
 
-                            // Generate JWT tokens
+                            // Generate JWT token
                             String accessToken = jwtIssuer.accessToken(user.getId().toString(), user.getEmail());
-                            String refreshToken = jwtIssuer.refreshToken(user.getId().toString());
 
                             // Prepare response
                             UserDto userDto = new UserDto(
@@ -94,8 +97,7 @@ public class AuthController {
 
                             TokenDto tokenDto = new TokenDto(
                                     accessToken,
-                                    5400, // 90 minutes in seconds
-                                    refreshToken
+                                    604800 // 7 days in seconds (7 * 24 * 60 * 60 = 604800)
                             );
 
                             OtpVerifyResponseDto responseDto = new OtpVerifyResponseDto(
@@ -168,4 +170,145 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
         }
     }
+
+    @PostMapping("/wedding/join")
+    public ResponseEntity<?> joinWedding(
+            @RequestHeader("Authorization") String authHeader,
+            @Valid @RequestBody JoinWeddingDto request) {
+        try {
+            // Extract user ID from JWT token
+            String token = authHeader.replace("Bearer ", "");
+            String userId = jwtIssuer.getUserIdFromToken(token);
+
+            // Join wedding
+            JoinWeddingResponseDto response = weddingService.joinWedding(
+                    java.util.UUID.fromString(userId),
+                    request.getCode(),
+                    request.getDisplayName()
+            );
+
+            log.info("User {} joined wedding {}", userId, request.getCode());
+            return ResponseEntity.ok(response);
+
+        } catch (IllegalArgumentException e) {
+            log.error("Invalid wedding code: {}", request.getCode(), e);
+            ErrorResponseDto error = new ErrorResponseDto("WEDDING_NOT_FOUND", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        } catch (Exception e) {
+            log.error("Unexpected error in wedding join", e);
+            ErrorResponseDto error = new ErrorResponseDto("INTERNAL_ERROR", "An unexpected error occurred");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    @GetMapping("/weddings")
+    public ResponseEntity<?> getUserWeddings(@RequestHeader("Authorization") String authHeader) {
+        try {
+            // Extract user ID from JWT token
+            String token = authHeader.replace("Bearer ", "");
+            String userId = jwtIssuer.getUserIdFromToken(token);
+
+            // Get user weddings
+            java.util.List<UserWeddingDto> weddings = weddingService.getUserWeddings(java.util.UUID.fromString(userId));
+
+            log.info("Retrieved {} weddings for user {}", weddings.size(), userId);
+            return ResponseEntity.ok(weddings);
+
+        } catch (Exception e) {
+            log.error("Unexpected error in getting user weddings", e);
+            ErrorResponseDto error = new ErrorResponseDto("INTERNAL_ERROR", "An unexpected error occurred");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    @PostMapping("/wedding/create")
+    public ResponseEntity<?> createWedding(
+            @RequestHeader("Authorization") String authHeader,
+            @Valid @RequestBody CreateWeddingDto request) {
+        try {
+            // Extract user ID from JWT token
+            String token = authHeader.replace("Bearer ", "");
+            String userId = jwtIssuer.getUserIdFromToken(token);
+
+            // Create wedding
+            com.example.demo.models.Wedding wedding = weddingService.createWedding(
+                    request.getCode(),
+                    request.getTitle(),
+                    request.getPartner1(),
+                    request.getPartner2(),
+                    request.getCoverImageUrl()
+            );
+
+            log.info("User {} created wedding {}", userId, request.getCode());
+            return ResponseEntity.ok(wedding);
+
+        } catch (IllegalArgumentException e) {
+            log.error("Invalid wedding creation request: {}", e.getMessage());
+            ErrorResponseDto error = new ErrorResponseDto("WEDDING_CREATION_ERROR", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        } catch (Exception e) {
+            log.error("Unexpected error in wedding creation", e);
+            ErrorResponseDto error = new ErrorResponseDto("INTERNAL_ERROR", "An unexpected error occurred");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    @DeleteMapping("/weddings/{weddingId}")
+    public ResponseEntity<?> deleteWedding(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String weddingId) {
+        try {
+            // Extract user ID from JWT token
+            String token = authHeader.replace("Bearer ", "");
+            String userId = jwtIssuer.getUserIdFromToken(token);
+
+            // Delete wedding and its bucket
+            weddingService.deleteWedding(
+                    java.util.UUID.fromString(weddingId),
+                    java.util.UUID.fromString(userId)
+            );
+
+            log.info("User {} deleted wedding {}", userId, weddingId);
+            return ResponseEntity.ok().build();
+
+        } catch (IllegalArgumentException e) {
+            log.error("Invalid wedding deletion request: {}", e.getMessage());
+            ErrorResponseDto error = new ErrorResponseDto("WEDDING_DELETION_ERROR", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        } catch (Exception e) {
+            log.error("Unexpected error in wedding deletion", e);
+            ErrorResponseDto error = new ErrorResponseDto("INTERNAL_ERROR", "An unexpected error occurred");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+    
+
+    
+    @GetMapping("/media/{weddingId}/{objectKey}")
+    public ResponseEntity<?> getMedia(@PathVariable String weddingId, 
+                                    @PathVariable String objectKey,
+                                    @RequestHeader("Authorization") String authHeader) {
+        try {
+            String token = authHeader.replace("Bearer ", "");
+            String userId = jwtIssuer.getUserIdFromToken(token);
+            
+            // Verify user has access to this wedding
+            // TODO: Add wedding access verification
+            
+            // Get public media URL
+            String fullObjectKey = weddingId + "/" + objectKey;
+            String publicUrl = s3Service.getPublicMediaUrl(fullObjectKey);
+            
+            // Redirect to public URL
+            return ResponseEntity.status(HttpStatus.FOUND)
+                    .header("Location", publicUrl)
+                    .build();
+                    
+        } catch (Exception e) {
+            log.error("Error serving media: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(java.util.Map.of("error", "Media not found"));
+        }
+    }
+    
 }

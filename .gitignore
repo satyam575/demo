@@ -31,3 +31,29 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Configuration Files ###
+# Application configuration with sensitive data
+src/main/resources/application.yml
+src/main/resources/application-*.yml
+src/main/resources/application.properties
+src/main/resources/application-*.properties
+
+### Postman Files ###
+# Postman collections and environments (may contain sensitive test data)
+*.postman_collection.json
+*.postman_environment.json
+Wedding_Social_Media_API.postman_collection.json
+Wedding_API_Environment.postman_environment.json
+
+### Test Files ###
+# Test data and documentation (may contain sensitive information)
+TEST_DATA.json
+TEST_FLOW_GUIDE.md
+run_tests.md
+
+### Environment Variables ###
+.env
+.env.local
+.env.*.local
+

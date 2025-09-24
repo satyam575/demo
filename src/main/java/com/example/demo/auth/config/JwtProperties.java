@@ -11,5 +11,4 @@ public class JwtProperties {
     private String secret;
     private String issuer;
     private int accessTtlMinutes;
-    private int refreshTtlDays;
 }

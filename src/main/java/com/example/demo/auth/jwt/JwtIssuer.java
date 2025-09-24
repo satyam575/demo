@@ -41,19 +41,6 @@ public class JwtIssuer {
                 .compact();
     }
     
-    public String refreshToken(String userId) {
-        Instant now = Instant.now();
-        Instant expiry = now.plus(jwtProperties.getRefreshTtlDays(), ChronoUnit.DAYS);
-        
-        return Jwts.builder()
-                .subject(userId)
-                .claim("type", "refresh")
-                .issuer(jwtProperties.getIssuer())
-                .issuedAt(Date.from(now))
-                .expiration(Date.from(expiry))
-                .signWith(getSigningKey())
-                .compact();
-    }
     
     public Claims parseToken(String token) {
         try {
