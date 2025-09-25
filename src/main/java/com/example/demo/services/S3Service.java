@@ -73,10 +73,13 @@ public class S3Service {
             
             log.info("Generated presigned upload URL for: {}", objectKey);
             
+            String mediaUrl = getMediaUrl(objectKey);
+            log.info("Generated presigned upload URL - Object Key: {}, Media URL: {}", objectKey, mediaUrl);
+            
             return new PresignedUploadResponse(
                     presignedUrl,
                     objectKey,
-                    getMediaUrl(objectKey),
+                    mediaUrl,
                     presignedRequest.expiration()
             );
         } catch (Exception e) {
@@ -142,7 +145,7 @@ public class S3Service {
     }
     
     public String getMediaUrl(String objectKey) {
-        return "/media/" + objectKey;
+        return awsS3Properties.getPublicUrl() + "/" + objectKey;
     }
     
     public String getPublicMediaUrl(String objectKey) {

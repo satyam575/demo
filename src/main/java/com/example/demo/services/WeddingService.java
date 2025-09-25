@@ -50,7 +50,7 @@ public class WeddingService {
                 userId,
                 displayName,
                 MemberRole.GUEST,
-                MemberStatus.ACTIVE
+                MemberStatus.ACCEPTED
         );
         
         WeddingMember savedMember = weddingMemberRepository.save(member);

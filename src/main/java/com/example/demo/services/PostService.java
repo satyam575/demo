@@ -31,6 +31,7 @@ public class PostService {
     private final UserRepository userRepository;
     private final WeddingService weddingService;
     private final S3Service s3Service;
+    private final com.example.demo.config.AwsS3Properties awsS3Properties;
     
     @Transactional
     public PostDto createPost(UUID userId, CreatePostDto request) {
@@ -52,8 +53,10 @@ public class PostService {
         if (request.getMediaUrls() != null && !request.getMediaUrls().isEmpty()) {
             for (int i = 0; i < request.getMediaUrls().size(); i++) {
                 String mediaUrl = request.getMediaUrls().get(i);
-                // Extract object key from URL (assuming it's the last part after the last slash)
-                String objectKey = mediaUrl.substring(mediaUrl.lastIndexOf("/") + 1);
+                log.info("Processing media URL: {}", mediaUrl);
+                // Extract object key from URL (remove the base S3 URL to get the full object key)
+                String objectKey = mediaUrl.replace(awsS3Properties.getPublicUrl() + "/", "");
+                log.info("Extracted object key: {}", objectKey);
                 
                 // Determine media type from URL or content type
                 MediaType mediaType = determineMediaTypeFromUrl(mediaUrl);
@@ -199,7 +202,7 @@ public class PostService {
         // Get media
         List<PostMedia> mediaList = postMediaRepository.findByPostIdOrderByOrderIndex(post.getId());
         List<PostMediaDto> mediaDtos = mediaList.stream()
-                .map(this::convertToPostMediaDto)
+                .map(media -> convertToPostMediaDto(media, post.getWeddingId()))
                 .collect(Collectors.toList());
         
         // Get like count
@@ -235,11 +238,15 @@ public class PostService {
         );
     }
     
-    private PostMediaDto convertToPostMediaDto(PostMedia media) {
+    private PostMediaDto convertToPostMediaDto(PostMedia media, UUID weddingId) {
+        // Construct the full media URL with wedding UUID folder
+        String fullObjectKey = weddingId.toString() + "/" + media.getObjectKey();
+        String mediaUrl = awsS3Properties.getPublicUrl() + "/" + fullObjectKey;
+        System.out.println("media url : " + mediaUrl);
         return new PostMediaDto(
                 media.getId(),
                 media.getType(),
-                s3Service.getMediaUrl(media.getObjectKey()),
+                mediaUrl,
                 media.getMimeType(),
                 media.getSizeBytes(),
                 media.getDurationSec(),
