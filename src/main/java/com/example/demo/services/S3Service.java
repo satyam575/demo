@@ -58,9 +58,13 @@ public class S3Service {
         String objectKey = generateObjectKey(weddingId, mediaType, fileExtension);
         
         try (S3Presigner presigner = getS3Presigner()) {
+            // Set Content-Type and Cache-Control on the object so browsers/CDNs cache aggressively.
+            String cacheControl = "public, max-age=31536000, immutable"; // 1 year, versioned keys are immutable
             PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                     .bucket(bucketName)
                     .key(objectKey)
+                    .contentType(contentType)
+                    .cacheControl(cacheControl)
                     .build();
             
             PutObjectPresignRequest presignRequest = PutObjectPresignRequest.builder()

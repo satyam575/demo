@@ -21,6 +21,9 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
     @Query("SELECT COUNT(c) FROM Comment c WHERE c.postId = :postId AND c.isDeleted = false")
     long countByPostIdAndIsDeletedFalse(@Param("postId") UUID postId);
     
+    @Query("SELECT c.postId as postId, COUNT(c) as commentCount FROM Comment c WHERE c.postId IN :postIds AND c.isDeleted = false GROUP BY c.postId")
+    List<PostCommentCount> countByPostIdInAndIsDeletedFalse(@Param("postIds") List<UUID> postIds);
+    
     @Query("SELECT c FROM Comment c WHERE c.authorMemberId = :authorMemberId AND c.isDeleted = false ORDER BY c.createdAt DESC")
     Page<Comment> findByAuthorMemberIdAndIsDeletedFalseOrderByCreatedAtDesc(UUID authorMemberId, Pageable pageable);
 }

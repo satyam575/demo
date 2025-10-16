@@ -15,6 +15,8 @@ public interface PostMediaRepository extends JpaRepository<PostMedia, UUID> {
     
     List<PostMedia> findByPostIdOrderByOrderIndex(UUID postId);
     
+    List<PostMedia> findByPostIdInOrderByPostIdAscOrderIndexAsc(List<UUID> postIds);
+    
     @Query("SELECT pm FROM PostMedia pm WHERE pm.postId = :postId ORDER BY pm.orderIndex")
     List<PostMedia> findByPostIdOrderByOrderIndexAsc(@Param("postId") UUID postId);
     

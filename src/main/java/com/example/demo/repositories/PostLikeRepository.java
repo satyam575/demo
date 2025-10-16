@@ -15,6 +15,11 @@ public interface PostLikeRepository extends JpaRepository<PostLike, UUID> {
     
     boolean existsByPostIdAndMemberId(UUID postId, UUID memberId);
     
+    @Query("SELECT pl.postId as postId, COUNT(pl) as likeCount FROM PostLike pl WHERE pl.postId IN :postIds GROUP BY pl.postId")
+    List<PostLikeCount> countByPostIdIn(@Param("postIds") List<UUID> postIds);
+    
+    List<PostLike> findPostIdsByMemberIdAndPostIdIn(UUID memberId, List<UUID> postIds);
+    
     Optional<PostLike> findByPostIdAndMemberId(UUID postId, UUID memberId);
     
     @Query("SELECT COUNT(pl) FROM PostLike pl WHERE pl.postId = :postId")

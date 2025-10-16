@@ -14,6 +14,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -54,9 +55,16 @@ public class PostService {
             for (int i = 0; i < request.getMediaUrls().size(); i++) {
                 String mediaUrl = request.getMediaUrls().get(i);
                 log.info("Processing media URL: {}", mediaUrl);
-                // Extract object key from URL (remove the base S3 URL to get the full object key)
-                String objectKey = mediaUrl.replace(awsS3Properties.getPublicUrl() + "/", "");
-                log.info("Extracted object key: {}", objectKey);
+                // Extract object key from URL, store only the leaf (without weddingId prefix)
+                String objectKeyWithPrefix = mediaUrl.replace(awsS3Properties.getPublicUrl() + "/", "");
+                String objectKey;
+                int lastSlash = objectKeyWithPrefix.lastIndexOf('/');
+                if (lastSlash >= 0 && lastSlash < objectKeyWithPrefix.length() - 1) {
+                    objectKey = objectKeyWithPrefix.substring(lastSlash + 1);
+                } else {
+                    objectKey = objectKeyWithPrefix;
+                }
+                log.info("Extracted leaf object key: {} (from: {})", objectKey, objectKeyWithPrefix);
                 
                 // Determine media type from URL or content type
                 MediaType mediaType = determineMediaTypeFromUrl(mediaUrl);
@@ -88,7 +96,16 @@ public class PostService {
         Pageable pageable = PageRequest.of(page, size);
         Page<Post> posts = postRepository.findByWeddingIdAndIsDeletedFalseOrderByCreatedAtDesc(weddingId, pageable);
         
-        return posts.map(post -> convertToPostDto(post, userId));
+        // Batch load all related data to avoid N+1 queries
+        List<PostDto> optimizedPostDtos = convertToPostDtoBatch(posts.getContent(), userId, weddingId);
+        
+        return posts.map(post -> {
+            // Find the optimized DTO for this post
+            return optimizedPostDtos.stream()
+                    .filter(dto -> dto.getId().equals(post.getId()))
+                    .findFirst()
+                    .orElse(convertToPostDto(post, userId)); // Fallback to original method
+        });
     }
     
     @Transactional
@@ -191,6 +208,88 @@ public class PostService {
         return mediaUrl;
     }
     
+    /**
+     * Optimized method to convert multiple posts to DTOs with batch queries
+     */
+    private List<PostDto> convertToPostDtoBatch(List<Post> posts, UUID userId, UUID weddingId) {
+        if (posts.isEmpty()) {
+            return List.of();
+        }
+        
+        // Extract all post IDs and author member IDs
+        List<UUID> postIds = posts.stream().map(Post::getId).collect(Collectors.toList());
+        List<UUID> authorMemberIds = posts.stream().map(Post::getAuthorMemberId).distinct().collect(Collectors.toList());
+        
+        // Batch load all author members
+        List<WeddingMember> authorMembers = weddingMemberRepository.findAllById(authorMemberIds);
+        Map<UUID, WeddingMember> authorMemberMap = authorMembers.stream()
+                .collect(Collectors.toMap(WeddingMember::getId, member -> member));
+        
+        // Batch load all author users
+        List<UUID> userIds = authorMembers.stream().map(WeddingMember::getUserId).collect(Collectors.toList());
+        List<User> authorUsers = userRepository.findAllById(userIds);
+        Map<UUID, User> userMap = authorUsers.stream()
+                .collect(Collectors.toMap(User::getId, user -> user));
+        
+        // Batch load all media for all posts
+        List<PostMedia> allMedia = postMediaRepository.findByPostIdInOrderByPostIdAscOrderIndexAsc(postIds);
+        Map<UUID, List<PostMedia>> mediaMap = allMedia.stream()
+                .collect(Collectors.groupingBy(PostMedia::getPostId));
+        
+        // Batch load like counts for all posts
+        Map<UUID, Long> likeCountMap = postLikeRepository.countByPostIdIn(postIds)
+                .stream().collect(Collectors.toMap(
+                        result -> result.getPostId(), 
+                        result -> result.getLikeCount()
+                ));
+        
+        // Batch load comment counts for all posts
+        Map<UUID, Long> commentCountMap = commentRepository.countByPostIdInAndIsDeletedFalse(postIds)
+                .stream().collect(Collectors.toMap(
+                        result -> result.getPostId(),
+                        result -> result.getCommentCount()
+                ));
+        
+        // Get user member once for like checking
+        Optional<WeddingMember> userMember = weddingService.getWeddingMember(userId, weddingId);
+        Map<UUID, Boolean> likedByUserMap; // Will be populated if user member exists
+        
+        if (userMember.isPresent()) {
+            List<PostLike> likedPostIds = postLikeRepository.findPostIdsByMemberIdAndPostIdIn(userMember.get().getId(), postIds);
+            likedByUserMap = likedPostIds.stream()
+                    .collect(Collectors.toMap(PostLike::getPostId, postId -> true));
+        } else {
+            likedByUserMap = Map.of();
+        }
+
+        // Convert posts to DTOs using batch-loaded data
+        return posts.stream().map(post -> {
+            WeddingMember authorMember = authorMemberMap.get(post.getAuthorMemberId());
+            User authorUser = userMap.get(authorMember.getUserId());
+            List<PostMedia> mediaList = mediaMap.getOrDefault(post.getId(), List.of());
+            List<PostMediaDto> mediaDtos = mediaList.stream()
+                    .map(media -> convertToPostMediaDto(media, weddingId))
+                    .collect(Collectors.toList());
+            
+            return new PostDto(
+                    post.getId(),
+                    post.getWeddingId(),
+                    post.getAuthorMemberId(),
+                    authorUser.getName(),
+                    authorMember.getDisplayName(),
+                    post.getContentText(),
+                    post.getVisibility(),
+                    post.getMediaCount(),
+                    mediaDtos,
+                    likeCountMap.getOrDefault(post.getId(), 0L).intValue(),
+                    commentCountMap.getOrDefault(post.getId(), 0L).intValue(),
+                    likedByUserMap.getOrDefault(post.getId(), false),
+                    post.getCreatedAt(),
+                    post.getUpdatedAt()
+            );
+        }).collect(Collectors.toList());
+    }
+    
     private PostDto convertToPostDto(Post post, UUID userId) {
         // Get author info
         WeddingMember authorMember = weddingMemberRepository.findById(post.getAuthorMemberId())
@@ -239,10 +338,13 @@ public class PostService {
     }
     
     private PostMediaDto convertToPostMediaDto(PostMedia media, UUID weddingId) {
-        // Construct the full media URL with wedding UUID folder
-        String fullObjectKey = weddingId.toString() + "/" + media.getObjectKey();
+        // We store only the leaf object key (e.g., "uuid.jpg").
+        // When returning, prepend the weddingId folder. For backward compatibility,
+        // if the stored key already contains the weddingId prefix, don't add it again.
+        String storedKey = media.getObjectKey();
+        String prefix = weddingId.toString() + "/";
+        String fullObjectKey = storedKey.startsWith(prefix) ? storedKey : (prefix + storedKey);
         String mediaUrl = awsS3Properties.getPublicUrl() + "/" + fullObjectKey;
-        System.out.println("media url : " + mediaUrl);
         return new PostMediaDto(
                 media.getId(),
                 media.getType(),
