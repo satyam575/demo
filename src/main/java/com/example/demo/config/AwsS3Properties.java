@@ -17,7 +17,7 @@ public class AwsS3Properties {
     
     // Media upload settings
     private int maxFileSizeMB = 50;
-    private String[] allowedImageTypes = {"image/jpeg", "image/png", "image/gif", "image/webp"};
+    private String[] allowedImageTypes = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif"};
     private String[] allowedVideoTypes = {"video/mp4", "video/quicktime", "video/x-msvideo"};
     private String[] allowedAudioTypes = {"audio/mpeg", "audio/wav", "audio/ogg"};
 }

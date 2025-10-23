@@ -54,7 +54,21 @@ public class S3Service {
     
     public PresignedUploadResponse generatePresignedUploadUrl(MediaType mediaType, UUID weddingId, String contentType, long fileSize) {
         String bucketName = awsS3Properties.getBucketName();
-        String fileExtension = getFileExtensionFromContentType(contentType);
+        String effectiveContentType = (contentType != null && !contentType.isBlank())
+                ? contentType
+                : switch (mediaType) {
+                    case IMAGE -> "image/jpeg";
+                    case VIDEO -> "video/mp4";
+                    case AUDIO -> "audio/mpeg";
+                };
+        String fileExtension = getFileExtensionFromContentType(effectiveContentType);
+        if (fileExtension == null || fileExtension.isEmpty()) {
+            fileExtension = switch (mediaType) {
+                case IMAGE -> ".jpg";
+                case VIDEO -> ".mp4";
+                case AUDIO -> ".mp3";
+            };
+        }
         String objectKey = generateObjectKey(weddingId, mediaType, fileExtension);
         
         try (S3Presigner presigner = getS3Presigner()) {
@@ -63,7 +77,7 @@ public class S3Service {
             PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                     .bucket(bucketName)
                     .key(objectKey)
-                    .contentType(contentType)
+                    .contentType(effectiveContentType)
                     .cacheControl(cacheControl)
                     .build();
             
@@ -80,12 +94,14 @@ public class S3Service {
             String mediaUrl = getMediaUrl(objectKey);
             log.info("Generated presigned upload URL - Object Key: {}, Media URL: {}", objectKey, mediaUrl);
             
-            return new PresignedUploadResponse(
-                    presignedUrl,
-                    objectKey,
-                    mediaUrl,
-                    presignedRequest.expiration()
-            );
+            PresignedUploadResponse dto = new PresignedUploadResponse();
+            dto.setUploadUrl(presignedUrl);
+            dto.setObjectKey(objectKey);
+            dto.setMediaUrl(mediaUrl);
+            dto.setExpiration(presignedRequest.expiration());
+            dto.setContentType(effectiveContentType);
+            dto.setCacheControl(cacheControl);
+            return dto;
         } catch (Exception e) {
             log.error("Failed to generate presigned URL for bucket: {}, key: {}", bucketName, objectKey, e);
             throw new RuntimeException("Failed to generate presigned URL: " + e.getMessage(), e);
@@ -96,6 +112,18 @@ public class S3Service {
         validateFile(file, mediaType);
         
         String fileExtension = getFileExtension(file.getOriginalFilename());
+        if (fileExtension == null || fileExtension.isEmpty()) {
+            String fromCt = getFileExtensionFromContentType(file.getContentType());
+            if (fromCt != null && !fromCt.isEmpty()) {
+                fileExtension = fromCt;
+            } else {
+                fileExtension = switch (mediaType) {
+                    case IMAGE -> ".jpg";
+                    case VIDEO -> ".mp4";
+                    case AUDIO -> ".mp3";
+                };
+            }
+        }
         String objectKey = generateObjectKey(weddingId, mediaType, fileExtension);
         
         try (S3Client s3Client = getS3Client()) {
@@ -233,7 +261,7 @@ public class S3Service {
     
     private String getFileExtensionFromContentType(String contentType) {
         if (contentType == null) return "";
-        
+
         switch (contentType) {
             case "image/jpeg":
                 return ".jpg";
@@ -243,6 +271,10 @@ public class S3Service {
                 return ".gif";
             case "image/webp":
                 return ".webp";
+            case "image/heic":
+                return ".heic";
+            case "image/heif":
+                return ".heif";
             case "video/mp4":
                 return ".mp4";
             case "video/quicktime":

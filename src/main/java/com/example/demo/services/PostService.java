@@ -33,6 +33,8 @@ public class PostService {
     private final WeddingService weddingService;
     private final S3Service s3Service;
     private final com.example.demo.config.AwsS3Properties awsS3Properties;
+    private final com.example.demo.repositories.PushSubscriptionRepository pushSubscriptionRepository;
+    private final WebPushService webPushService;
     
     @Transactional
     public PostDto createPost(UUID userId, CreatePostDto request) {
@@ -84,6 +86,34 @@ public class PostService {
         }
         
         log.info("Created post {} for wedding {} by user {}", savedPost.getId(), weddingId, userId);
+
+        // Notify all accepted wedding members about the new post (excluding author)
+        try {
+            var members = weddingMemberRepository.findByWeddingIdAndStatus(weddingId, MemberStatus.ACCEPTED);
+            String weddingTitle = weddingService.getWeddingMember(userId, weddingId)
+                    .map(m -> m.getWedding().getTitle())
+                    .orElse("Wedding");
+
+            String authorName = userRepository.findById(member.getUserId())
+                    .map(u -> u.getName() != null ? u.getName() : "Someone")
+                    .orElse("Someone");
+
+            String url = "/wedding/" + weddingId;
+            String title = "New post in " + weddingTitle;
+            String body = authorName + " shared a memory";
+            String json = String.format("{\"type\":\"NEW_POST\",\"title\":%s,\"body\":%s,\"url\":%s,\"weddingId\":%s,\"postId\":%s}",
+                    toJsonString(title), toJsonString(body), toJsonString(url),
+                    toJsonString(weddingId.toString()), toJsonString(savedPost.getId().toString()));
+
+            for (WeddingMember wm : members) {
+                if (wm.getUserId().equals(userId)) continue;
+                var subs = pushSubscriptionRepository.findByUserIdOrderByCreatedAtDesc(wm.getUserId());
+                subs.forEach(s -> webPushService.send(s.getEndpoint(), s.getP256dh(), s.getAuth(), json));
+            }
+        } catch (Exception e) {
+            log.warn("Failed to dispatch web push for new post {}: {}", savedPost.getId(), e.getMessage());
+        }
+
         return convertToPostDto(savedPost, userId);
     }
     
@@ -356,6 +386,10 @@ public class PostService {
                 media.getTranscodeStatus(),
                 media.getCreatedAt()
         );
+    }
+
+    private String toJsonString(String v) {
+        return '"' + v.replace("\\", "\\\\").replace("\"", "\\\"") + '"';
     }
     
     private CommentDto convertToCommentDto(Comment comment) {
