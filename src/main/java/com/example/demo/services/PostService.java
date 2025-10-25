@@ -462,4 +462,18 @@ public class PostService {
         }
         return "application/octet-stream"; // Default
     }
+
+    public org.springframework.data.domain.Page<PostDto> getMemberPosts(java.util.UUID userId, java.util.UUID weddingId, java.util.UUID authorMemberId, int page, int size) {
+        if (!weddingService.isUserMemberOfWedding(userId, weddingId)) {
+            throw new IllegalArgumentException("User is not a member of this wedding");
+        }
+        org.springframework.data.domain.Pageable pageable = org.springframework.data.domain.PageRequest.of(page, size);
+        org.springframework.data.domain.Page<com.example.demo.models.Post> posts = postRepository.findByAuthorMemberIdAndIsDeletedFalseOrderByCreatedAtDesc(authorMemberId, pageable);
+        java.util.List<PostDto> optimized = convertToPostDtoBatch(posts.getContent(), userId, weddingId);
+        return posts.map(post -> optimized.stream()
+                .filter(dto -> dto.getId().equals(post.getId()))
+                .findFirst()
+                .orElse(convertToPostDto(post, userId)));
+    }
 }
+

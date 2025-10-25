@@ -1,9 +1,14 @@
 package com.example.demo.controllers;
 
 import com.example.demo.auth.dtos.*;
+import com.example.demo.auth.dtos.WeddingMemberDto;
 import com.example.demo.auth.jwt.JwtIssuer;
 import com.example.demo.models.MediaType;
+import com.example.demo.models.MemberStatus;
+import com.example.demo.models.WeddingMember;
 import com.example.demo.services.PostService;
+import com.example.demo.repositories.UserRepository;
+import com.example.demo.repositories.WeddingMemberRepository;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +28,8 @@ public class SocialController {
     
     private final PostService postService;
     private final JwtIssuer jwtIssuer;
+    private final WeddingMemberRepository weddingMemberRepository;
+    private final UserRepository userRepository;
     
     @PostMapping("/weddings/{weddingId}/posts")
     public ResponseEntity<?> createPost(
@@ -49,6 +56,38 @@ public class SocialController {
             return ResponseEntity.badRequest().body(error);
         } catch (Exception e) {
             log.error("Unexpected error in post creation", e);
+            ErrorResponseDto error = new ErrorResponseDto("INTERNAL_ERROR", "An unexpected error occurred");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    @GetMapping("/weddings/{weddingId}/members")
+    public ResponseEntity<?> getWeddingMembers(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String weddingId) {
+        try {
+            String token = authHeader.replace("Bearer ", "");
+            String userId = jwtIssuer.getUserIdFromToken(token);
+
+            var members = weddingMemberRepository.findByWeddingIdAndStatus(
+                    java.util.UUID.fromString(weddingId), MemberStatus.ACCEPTED);
+
+            java.util.List<WeddingMemberDto> result = new java.util.ArrayList<>();
+            for (WeddingMember wm : members) {
+                var userOpt = userRepository.findById(wm.getUserId());
+                String name = userOpt.map(u -> u.getName()).orElse(null);
+                String avatar = userOpt.map(u -> u.getAvatarUrl()).orElse(null);
+                result.add(new WeddingMemberDto(
+                        wm.getId(), wm.getUserId(), name, wm.getDisplayName(),
+                        wm.getRole(), wm.getStatus(), avatar, wm.getJoinedAt()
+                ));
+            }
+
+            log.info("Retrieved {} members for wedding {} by user {}", result.size(), weddingId, userId);
+            return ResponseEntity.ok(result);
+
+        } catch (Exception e) {
+            log.error("Unexpected error in getting wedding members", e);
             ErrorResponseDto error = new ErrorResponseDto("INTERNAL_ERROR", "An unexpected error occurred");
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
         }
@@ -243,4 +282,65 @@ public class SocialController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
         }
     }
+
+    @GetMapping("/weddings/{weddingId}/members/{memberId}")
+    public ResponseEntity<?> getMemberProfile(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String weddingId,
+            @PathVariable String memberId) {
+        try {
+            String token = authHeader.replace("Bearer ", "");
+            String userId = jwtIssuer.getUserIdFromToken(token);
+
+            java.util.UUID wId = java.util.UUID.fromString(weddingId);
+            java.util.UUID mId = java.util.UUID.fromString(memberId);
+
+            var memberOpt = weddingMemberRepository.findById(mId);
+            if (memberOpt.isEmpty() || !memberOpt.get().getWeddingId().equals(wId)) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(java.util.Map.of("error", "Member not found"));
+            }
+            var member = memberOpt.get();
+            var userOpt = userRepository.findById(member.getUserId());
+            String name = userOpt.map(u -> u.getName()).orElse(null);
+            String avatar = userOpt.map(u -> u.getAvatarUrl()).orElse(null);
+            long postCount = 0L;
+
+            com.example.demo.auth.dtos.MemberProfileDto dto = new com.example.demo.auth.dtos.MemberProfileDto(
+                    member.getId(), member.getWeddingId(), member.getUserId(),
+                    name, member.getDisplayName(), avatar,
+                    member.getRole(), member.getStatus(), member.getJoinedAt(),
+                    postCount
+            );
+            return ResponseEntity.ok(dto);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ErrorResponseDto("INTERNAL_ERROR", "An unexpected error occurred"));
+        }
+    }
+
+    @GetMapping("/weddings/{weddingId}/members/{memberId}/posts")
+    public ResponseEntity<?> getMemberPosts(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String weddingId,
+            @PathVariable String memberId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        try {
+            String token = authHeader.replace("Bearer ", "");
+            String userId = jwtIssuer.getUserIdFromToken(token);
+            var posts = postService.getMemberPosts(
+                    java.util.UUID.fromString(userId),
+                    java.util.UUID.fromString(weddingId),
+                    java.util.UUID.fromString(memberId),
+                    page, size);
+            return ResponseEntity.ok(posts);
+        } catch (IllegalArgumentException e) {
+            ErrorResponseDto error = new ErrorResponseDto("POSTS_RETRIEVAL_ERROR", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        } catch (Exception e) {
+            ErrorResponseDto error = new ErrorResponseDto("INTERNAL_ERROR", "An unexpected error occurred");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
 }
+
