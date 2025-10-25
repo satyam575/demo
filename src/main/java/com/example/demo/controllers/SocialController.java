@@ -2,6 +2,10 @@ package com.example.demo.controllers;
 
 import com.example.demo.auth.dtos.*;
 import com.example.demo.auth.dtos.WeddingMemberDto;
+import com.example.demo.repositories.EventRepository;
+import com.example.demo.repositories.VenueRepository;
+import com.example.demo.models.Event;
+import com.example.demo.models.Venue;
 import com.example.demo.auth.jwt.JwtIssuer;
 import com.example.demo.models.MediaType;
 import com.example.demo.models.MemberStatus;
@@ -30,6 +34,8 @@ public class SocialController {
     private final JwtIssuer jwtIssuer;
     private final WeddingMemberRepository weddingMemberRepository;
     private final UserRepository userRepository;
+    private final EventRepository eventRepository;
+    private final VenueRepository venueRepository;
     
     @PostMapping("/weddings/{weddingId}/posts")
     public ResponseEntity<?> createPost(
@@ -90,6 +96,91 @@ public class SocialController {
             log.error("Unexpected error in getting wedding members", e);
             ErrorResponseDto error = new ErrorResponseDto("INTERNAL_ERROR", "An unexpected error occurred");
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    @GetMapping("/weddings/{weddingId}/venues")
+    public ResponseEntity<?> getVenues(@RequestHeader("Authorization") String authHeader,
+                                       @PathVariable String weddingId) {
+        try {
+            var venues = venueRepository.findByWeddingId(java.util.UUID.fromString(weddingId));
+            java.util.List<VenueDto> list = new java.util.ArrayList<>();
+            for (Venue v : venues) {
+                list.add(new VenueDto(v.getId(), v.getWeddingId(), v.getName(), v.getAddress(), v.getMapsUrl(), v.getNotes(), v.getCreatedAt()));
+            }
+            return ResponseEntity.ok(list);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ErrorResponseDto("INTERNAL_ERROR", "Failed to fetch venues"));
+        }
+    }
+
+    @PostMapping("/weddings/{weddingId}/venues")
+    public ResponseEntity<?> createVenue(@RequestHeader("Authorization") String authHeader,
+                                         @PathVariable String weddingId,
+                                         @Valid @RequestBody CreateVenueDto request) {
+        try {
+            String token = authHeader.replace("Bearer ", "");
+            java.util.UUID userId = java.util.UUID.fromString(jwtIssuer.getUserIdFromToken(token));
+            java.util.UUID wId = java.util.UUID.fromString(weddingId);
+            var memberOpt = weddingMemberRepository.findByWeddingIdAndUserId(wId, userId);
+            if (memberOpt.isEmpty() || memberOpt.get().getRole() != com.example.demo.models.MemberRole.ADMIN) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponseDto("FORBIDDEN", "Not authorized"));
+            }
+            Venue v = new Venue(wId, request.getName(), request.getAddress(), request.getMapsUrl(), request.getNotes());
+            var saved = venueRepository.save(v);
+            return ResponseEntity.ok(new VenueDto(saved.getId(), saved.getWeddingId(), saved.getName(), saved.getAddress(), saved.getMapsUrl(), saved.getNotes(), saved.getCreatedAt()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ErrorResponseDto("INTERNAL_ERROR", "Failed to create venue"));
+        }
+    }
+
+    @GetMapping("/weddings/{weddingId}/events")
+    public ResponseEntity<?> getEvents(@RequestHeader("Authorization") String authHeader,
+                                       @PathVariable String weddingId) {
+        try {
+            var events = eventRepository.findByWeddingIdOrderByStartTimeAsc(java.util.UUID.fromString(weddingId));
+            java.util.List<EventDto> list = new java.util.ArrayList<>();
+            for (Event e : events) {
+                list.add(new EventDto(e.getId(), e.getWeddingId(), e.getVenueId(), e.getTitle(), e.getDescription(), e.getStartTime()));
+            }
+            return ResponseEntity.ok(list);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ErrorResponseDto("INTERNAL_ERROR", "Failed to fetch events"));
+        }
+    }
+
+    @PostMapping("/weddings/{weddingId}/events")
+    public ResponseEntity<?> createEvent(@RequestHeader("Authorization") String authHeader,
+                                         @PathVariable String weddingId,
+                                         @Valid @RequestBody CreateEventDto request) {
+        try {
+            String token = authHeader.replace("Bearer ", "");
+            java.util.UUID userId = java.util.UUID.fromString(jwtIssuer.getUserIdFromToken(token));
+            java.util.UUID wId = java.util.UUID.fromString(weddingId);
+            var memberOpt = weddingMemberRepository.findByWeddingIdAndUserId(wId, userId);
+            if (memberOpt.isEmpty() || memberOpt.get().getRole() != com.example.demo.models.MemberRole.ADMIN) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponseDto("FORBIDDEN", "Not authorized"));
+            }
+            java.util.UUID venueId = null;
+            if (request.getVenueId() != null && !request.getVenueId().isBlank()) {
+                venueId = java.util.UUID.fromString(request.getVenueId());
+            }
+            java.time.Instant start = java.time.Instant.parse(request.getStartTimeIso());
+            java.time.Instant end;
+            if (request.getEndTimeIso() != null && !request.getEndTimeIso().isBlank()) {
+                end = java.time.Instant.parse(request.getEndTimeIso());
+            } else {
+                end = start.plus(java.time.Duration.ofHours(2));
+            }
+            Event e = new Event(wId, venueId, request.getTitle(), request.getDescription(), start, end);
+            var saved = eventRepository.save(e);
+            return ResponseEntity.ok(new EventDto(saved.getId(), saved.getWeddingId(), saved.getVenueId(), saved.getTitle(), saved.getDescription(), saved.getStartTime()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ErrorResponseDto("INTERNAL_ERROR", "Failed to create event"));
         }
     }
     
@@ -343,4 +434,5 @@ public class SocialController {
         }
     }
 }
+
 
