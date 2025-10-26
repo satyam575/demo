@@ -50,6 +50,8 @@ public class PostService {
         
         // Create post
         Post post = new Post(weddingId, member.getId(), request.getContentText(), request.getVisibility());
+        // Denormalized author user id to reduce joins later
+        post.setAuthorUserId(member.getUserId());
         Post savedPost = postRepository.save(post);
         
         // Handle media if provided
@@ -120,9 +122,10 @@ public class PostService {
     @Transactional(readOnly = true)
     public Page<PostDto> getWeddingPosts(UUID userId, UUID weddingId, int page, int size) {
         // Verify user is member of the wedding
-        if (!weddingService.isUserMemberOfWedding(userId, weddingId)) {
-            throw new IllegalArgumentException("User is not a member of this wedding");
-        }
+        // LETS NOT CHECK FOR THE PILOT
+//        if (!weddingService.isUserMemberOfWedding(userId, weddingId)) {
+//            throw new IllegalArgumentException("User is not a member of this wedding");
+//        }
         
         Pageable pageable = PageRequest.of(page, size);
         Page<Post> posts = postRepository.findByWeddingIdAndIsDeletedFalseOrderByCreatedAtDesc(weddingId, pageable);
@@ -251,18 +254,16 @@ public class PostService {
             return List.of();
         }
         
-        // Extract all post IDs and author member IDs
+        // Extract post IDs and author user IDs
         List<UUID> postIds = posts.stream().map(Post::getId).collect(Collectors.toList());
-        List<UUID> authorMemberIds = posts.stream().map(Post::getAuthorMemberId).distinct().collect(Collectors.toList());
-        
-        // Batch load all author members
-        List<WeddingMember> authorMembers = weddingMemberRepository.findAllById(authorMemberIds);
-        Map<UUID, WeddingMember> authorMemberMap = authorMembers.stream()
-                .collect(Collectors.toMap(WeddingMember::getId, member -> member));
-        
-        // Batch load all author users
-        List<UUID> userIds = authorMembers.stream().map(WeddingMember::getUserId).collect(Collectors.toList());
-        List<User> authorUsers = userRepository.findAllById(userIds);
+        List<UUID> authorUserIds = posts.stream()
+                .map(Post::getAuthorUserId)
+                .filter(id -> id != null)
+                .distinct()
+                .collect(Collectors.toList());
+
+        // Batch load all author users directly using denormalized author_user_id
+        List<User> authorUsers = userRepository.findAllById(authorUserIds);
         Map<UUID, User> userMap = authorUsers.stream()
                 .collect(Collectors.toMap(User::getId, user -> user));
         
@@ -287,8 +288,9 @@ public class PostService {
 
         // Convert posts to DTOs using batch-loaded data
         return posts.stream().map(post -> {
-            WeddingMember authorMember = authorMemberMap.get(post.getAuthorMemberId());
-            User authorUser = userMap.get(authorMember.getUserId());
+            // Use denormalized author_user_id; no wedding_member fallback after backfill
+            User authorUser = userMap.get(post.getAuthorUserId());
+            String authorName = authorUser != null ? authorUser.getName() : null;
             List<PostMedia> mediaList = mediaMap.getOrDefault(post.getId(), List.of());
             List<PostMediaDto> mediaDtos = mediaList.stream()
                     .map(media -> convertToPostMediaDto(media, weddingId))
@@ -298,8 +300,7 @@ public class PostService {
                     post.getId(),
                     post.getWeddingId(),
                     post.getAuthorMemberId(),
-                    authorUser.getName(),
-                    authorMember.getDisplayName(),
+                    authorName,
                     post.getContentText(),
                     post.getVisibility(),
                     post.getMediaCount(),
@@ -314,11 +315,11 @@ public class PostService {
     }
     
     private PostDto convertToPostDto(Post post, UUID userId) {
-        // Get author info
-        WeddingMember authorMember = weddingMemberRepository.findById(post.getAuthorMemberId())
-                .orElseThrow(() -> new IllegalArgumentException("Author member not found"));
-        
-        User authorUser = userRepository.findById(authorMember.getUserId())
+        // Get author info using denormalized author_user_id only
+        if (post.getAuthorUserId() == null) {
+            throw new IllegalArgumentException("Author user id missing for post");
+        }
+        User authorUser = userRepository.findById(post.getAuthorUserId())
                 .orElseThrow(() -> new IllegalArgumentException("Author user not found"));
         
         // Get media
@@ -345,7 +346,6 @@ public class PostService {
                 post.getWeddingId(),
                 post.getAuthorMemberId(),
                 authorUser.getName(),
-                authorMember.getDisplayName(),
                 post.getContentText(),
                 post.getVisibility(),
                 post.getMediaCount(),
@@ -396,7 +396,6 @@ public class PostService {
                 comment.getPostId(),
                 comment.getAuthorMemberId(),
                 authorUser.getName(),
-                authorMember.getDisplayName(),
                 comment.getContentText(),
                 comment.getCreatedAt(),
                 comment.getUpdatedAt()

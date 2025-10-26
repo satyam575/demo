@@ -16,7 +16,6 @@ public class CommentDto {
     private UUID postId;
     private UUID authorMemberId;
     private String authorName;
-    private String authorDisplayName;
     private String contentText;
     private Instant createdAt;
     private Instant updatedAt;

@@ -18,7 +18,6 @@ public class PostDto {
     private UUID weddingId;
     private UUID authorMemberId;
     private String authorName;
-    private String authorDisplayName;
     private String contentText;
     private PostVisibility visibility;
     private int mediaCount;

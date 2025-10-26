@@ -24,6 +24,10 @@ public class Post {
     
     @Column(name = "author_member_id", nullable = false)
     private UUID authorMemberId;
+
+    // Denormalized author user id to avoid traversing wedding_members when not needed
+    @Column(name = "author_user_id")
+    private UUID authorUserId;
     
     @Column(name = "content_text", columnDefinition = "TEXT")
     private String contentText;
