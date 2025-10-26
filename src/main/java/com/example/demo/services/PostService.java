@@ -117,6 +117,7 @@ public class PostService {
         return convertToPostDto(savedPost, userId);
     }
     
+    @Transactional(readOnly = true)
     public Page<PostDto> getWeddingPosts(UUID userId, UUID weddingId, int page, int size) {
         // Verify user is member of the wedding
         if (!weddingService.isUserMemberOfWedding(userId, weddingId)) {
@@ -157,6 +158,8 @@ public class PostService {
         // Create comment
         Comment comment = new Comment(postId, member.getId(), request.getContentText());
         Comment savedComment = commentRepository.save(comment);
+        // increment denormalized comment count
+        postRepository.incrementCommentCount(postId);
         
         log.info("Created comment {} for post {} by user {}", savedComment.getId(), postId, userId);
         return convertToCommentDto(savedComment);
@@ -197,11 +200,13 @@ public class PostService {
         if (existingLike.isPresent()) {
             // Unlike
             postLikeRepository.delete(existingLike.get());
+            postRepository.decrementLikeCount(postId);
             log.info("User {} unliked post {}", userId, postId);
         } else {
             // Like
             PostLike like = new PostLike(postId, member.getId());
             postLikeRepository.save(like);
+            postRepository.incrementLikeCount(postId);
             log.info("User {} liked post {}", userId, postId);
         }
     }
@@ -266,19 +271,7 @@ public class PostService {
         Map<UUID, List<PostMedia>> mediaMap = allMedia.stream()
                 .collect(Collectors.groupingBy(PostMedia::getPostId));
         
-        // Batch load like counts for all posts
-        Map<UUID, Long> likeCountMap = postLikeRepository.countByPostIdIn(postIds)
-                .stream().collect(Collectors.toMap(
-                        result -> result.getPostId(), 
-                        result -> result.getLikeCount()
-                ));
-        
-        // Batch load comment counts for all posts
-        Map<UUID, Long> commentCountMap = commentRepository.countByPostIdInAndIsDeletedFalse(postIds)
-                .stream().collect(Collectors.toMap(
-                        result -> result.getPostId(),
-                        result -> result.getCommentCount()
-                ));
+        // Counts now come from the denormalized columns on Post
         
         // Get user member once for like checking
         Optional<WeddingMember> userMember = weddingService.getWeddingMember(userId, weddingId);
@@ -311,8 +304,8 @@ public class PostService {
                     post.getVisibility(),
                     post.getMediaCount(),
                     mediaDtos,
-                    likeCountMap.getOrDefault(post.getId(), 0L).intValue(),
-                    commentCountMap.getOrDefault(post.getId(), 0L).intValue(),
+                    post.getLikeCount(),
+                    post.getCommentCount(),
                     likedByUserMap.getOrDefault(post.getId(), false),
                     post.getCreatedAt(),
                     post.getUpdatedAt()
@@ -334,11 +327,9 @@ public class PostService {
                 .map(media -> convertToPostMediaDto(media, post.getWeddingId()))
                 .collect(Collectors.toList());
         
-        // Get like count
-        long likeCount = postLikeRepository.countByPostId(post.getId());
-        
-        // Get comment count
-        long commentCount = commentRepository.countByPostIdAndIsDeletedFalse(post.getId());
+        // Use denormalized counts on Post
+        long likeCount = post.getLikeCount();
+        long commentCount = post.getCommentCount();
         
         // Check if user liked this post
         boolean isLikedByUser = false;

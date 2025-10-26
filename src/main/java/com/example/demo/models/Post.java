@@ -37,6 +37,12 @@ public class Post {
     
     @Column(name = "media_count", nullable = false)
     private int mediaCount = 0;
+
+    @Column(name = "like_count", nullable = false, columnDefinition = "integer default 0")
+    private int likeCount = 0;
+
+    @Column(name = "comment_count", nullable = false, columnDefinition = "integer default 0")
+    private int commentCount = 0;
     
     @Column(name = "primary_media_id")
     private UUID primaryMediaId;
@@ -66,6 +72,8 @@ public class Post {
         this.visibility = visibility;
         this.isDeleted = false;
         this.mediaCount = 0;
+        this.likeCount = 0;
+        this.commentCount = 0;
         this.createdAt = Instant.now();
         this.updatedAt = Instant.now();
     }
