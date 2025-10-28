@@ -258,7 +258,6 @@ public class PostService {
         List<UUID> postIds = posts.stream().map(Post::getId).collect(Collectors.toList());
         List<UUID> authorUserIds = posts.stream()
                 .map(Post::getAuthorUserId)
-                .filter(id -> id != null)
                 .distinct()
                 .collect(Collectors.toList());
 
@@ -271,8 +270,6 @@ public class PostService {
         List<PostMedia> allMedia = postMediaRepository.findByPostIdInOrderByPostIdAscOrderIndexAsc(postIds);
         Map<UUID, List<PostMedia>> mediaMap = allMedia.stream()
                 .collect(Collectors.groupingBy(PostMedia::getPostId));
-        
-        // Counts now come from the denormalized columns on Post
         
         // Get user member once for like checking
         Optional<WeddingMember> userMember = weddingService.getWeddingMember(userId, weddingId);
