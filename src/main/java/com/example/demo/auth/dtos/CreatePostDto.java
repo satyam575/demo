@@ -24,4 +24,7 @@ public class CreatePostDto {
     private PostVisibility visibility;
     
     private List<String> mediaUrls; // URLs of uploaded media files
+
+    // Optional association to a function/event
+    private String eventId;
 }

@@ -31,6 +31,9 @@ public class Post {
     
     @Column(name = "content_text", columnDefinition = "TEXT")
     private String contentText;
+
+    @Column(name = "event_id")
+    private java.util.UUID eventId;
     
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

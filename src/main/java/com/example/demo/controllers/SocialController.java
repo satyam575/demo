@@ -13,6 +13,7 @@ import com.example.demo.models.WeddingMember;
 import com.example.demo.services.PostService;
 import com.example.demo.repositories.UserRepository;
 import com.example.demo.repositories.WeddingMemberRepository;
+import com.example.demo.services.ChallengeService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,6 +37,7 @@ public class SocialController {
     private final UserRepository userRepository;
     private final EventRepository eventRepository;
     private final VenueRepository venueRepository;
+    private final ChallengeService challengeService;
     
     @PostMapping("/weddings/{weddingId}/posts")
     public ResponseEntity<?> createPost(
@@ -406,6 +408,104 @@ public class SocialController {
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(new ErrorResponseDto("INTERNAL_ERROR", "An unexpected error occurred"));
+        }
+    }
+
+    // Challenges
+    @GetMapping("/weddings/{weddingId}/challenges")
+    public ResponseEntity<?> listChallenges(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String weddingId,
+            @RequestParam(required = false) String eventId,
+            @RequestParam(defaultValue = "true") boolean includeCounts,
+            @RequestParam(defaultValue = "true") boolean activeOnly
+    ) {
+        try {
+            UUID wId = UUID.fromString(weddingId);
+            UUID eId = (eventId != null && !eventId.isBlank()) ? UUID.fromString(eventId) : null;
+            var list = challengeService.list(wId, eId, includeCounts, activeOnly);
+            return ResponseEntity.ok(list);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ErrorResponseDto("INTERNAL_ERROR", "Failed to fetch challenges"));
+        }
+    }
+
+    @PostMapping("/weddings/{weddingId}/challenges")
+    public ResponseEntity<?> createChallenge(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String weddingId,
+            @Valid @RequestBody CreateChallengeDto request
+    ) {
+        try {
+            String token = authHeader.replace("Bearer ", "");
+            String userId = jwtIssuer.getUserIdFromToken(token);
+            UUID wId = UUID.fromString(weddingId);
+            // Admin check
+            var m = weddingMemberRepository.findByWeddingIdAndUserId(wId, UUID.fromString(userId));
+            if (m.isEmpty() || m.get().getRole() != com.example.demo.models.MemberRole.ADMIN) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponseDto("FORBIDDEN", "Not authorized"));
+            }
+            UUID eId = (request.getEventId() != null && !request.getEventId().isBlank()) ? UUID.fromString(request.getEventId()) : null;
+            java.time.Instant start = null;
+            java.time.Instant end = null;
+            if (request.getStartAtIso() != null && !request.getStartAtIso().isBlank()) start = java.time.Instant.parse(request.getStartAtIso());
+            if (request.getEndAtIso() != null && !request.getEndAtIso().isBlank()) end = java.time.Instant.parse(request.getEndAtIso());
+            var dto = challengeService.create(wId, request.getTag(), request.getTitle(), request.getDescription(), eId, request.getActive(), start, end);
+            return ResponseEntity.ok(dto);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ErrorResponseDto("INTERNAL_ERROR", "Failed to create challenge"));
+        }
+    }
+
+    @PutMapping("/weddings/{weddingId}/challenges/{id}")
+    public ResponseEntity<?> updateChallenge(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String weddingId,
+            @PathVariable String id,
+            @Valid @RequestBody CreateChallengeDto request
+    ) {
+        try {
+            String token = authHeader.replace("Bearer ", "");
+            String userId = jwtIssuer.getUserIdFromToken(token);
+            UUID wId = UUID.fromString(weddingId);
+            var m = weddingMemberRepository.findByWeddingIdAndUserId(wId, UUID.fromString(userId));
+            if (m.isEmpty() || m.get().getRole() != com.example.demo.models.MemberRole.ADMIN) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponseDto("FORBIDDEN", "Not authorized"));
+            }
+            UUID eId = (request.getEventId() != null && !request.getEventId().isBlank()) ? UUID.fromString(request.getEventId()) : null;
+            java.time.Instant start = null;
+            java.time.Instant end = null;
+            if (request.getStartAtIso() != null && !request.getStartAtIso().isBlank()) start = java.time.Instant.parse(request.getStartAtIso());
+            if (request.getEndAtIso() != null && !request.getEndAtIso().isBlank()) end = java.time.Instant.parse(request.getEndAtIso());
+            var dto = challengeService.update(UUID.fromString(id), request.getTag(), request.getTitle(), request.getDescription(), eId, request.getActive(), start, end);
+            return ResponseEntity.ok(dto);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ErrorResponseDto("INTERNAL_ERROR", "Failed to update challenge"));
+        }
+    }
+
+    @DeleteMapping("/weddings/{weddingId}/challenges/{id}")
+    public ResponseEntity<?> deleteChallenge(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String weddingId,
+            @PathVariable String id
+    ) {
+        try {
+            String token = authHeader.replace("Bearer ", "");
+            String userId = jwtIssuer.getUserIdFromToken(token);
+            UUID wId = UUID.fromString(weddingId);
+            var m = weddingMemberRepository.findByWeddingIdAndUserId(wId, UUID.fromString(userId));
+            if (m.isEmpty() || m.get().getRole() != com.example.demo.models.MemberRole.ADMIN) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponseDto("FORBIDDEN", "Not authorized"));
+            }
+            challengeService.delete(UUID.fromString(id));
+            return ResponseEntity.ok().build();
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ErrorResponseDto("INTERNAL_ERROR", "Failed to delete challenge"));
         }
     }
 

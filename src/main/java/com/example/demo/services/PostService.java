@@ -35,6 +35,7 @@ public class PostService {
     private final com.example.demo.config.AwsS3Properties awsS3Properties;
     private final com.example.demo.repositories.PushSubscriptionRepository pushSubscriptionRepository;
     private final WebPushService webPushService;
+    private final ChallengeService challengeService;
     
     @Transactional
     public PostDto createPost(UUID userId, CreatePostDto request) {
@@ -52,6 +53,12 @@ public class PostService {
         Post post = new Post(weddingId, member.getId(), request.getContentText(), request.getVisibility());
         // Denormalized author user id to reduce joins later
         post.setAuthorUserId(member.getUserId());
+        // Optional association with an event/function
+        if (request.getEventId() != null && !request.getEventId().isBlank()) {
+            try {
+                post.setEventId(java.util.UUID.fromString(request.getEventId()));
+            } catch (Exception ignored) {}
+        }
         Post savedPost = postRepository.save(post);
         
         // Handle media if provided
@@ -88,6 +95,13 @@ public class PostService {
         }
         
         log.info("Created post {} for wedding {} by user {}", savedPost.getId(), weddingId, userId);
+
+        // Record challenge participation based on hashtags in content
+        try {
+            challengeService.recordParticipationForPost(savedPost);
+        } catch (Exception e) {
+            log.warn("Failed to record challenge participation for post {}: {}", savedPost.getId(), e.getMessage());
+        }
 
         // Notify all accepted wedding members about the new post (excluding author)
         try {
