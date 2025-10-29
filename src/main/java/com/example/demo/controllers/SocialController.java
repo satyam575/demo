@@ -2,6 +2,7 @@ package com.example.demo.controllers;
 
 import com.example.demo.auth.dtos.*;
 import com.example.demo.auth.dtos.WeddingMemberDto;
+import com.example.demo.auth.dtos.HelplineDto;
 import com.example.demo.repositories.EventRepository;
 import com.example.demo.repositories.VenueRepository;
 import com.example.demo.models.Event;
@@ -13,6 +14,9 @@ import com.example.demo.models.WeddingMember;
 import com.example.demo.services.PostService;
 import com.example.demo.repositories.UserRepository;
 import com.example.demo.repositories.WeddingMemberRepository;
+import com.example.demo.repositories.WeddingRepository;
+import com.example.demo.repositories.HelplineRepository;
+import com.example.demo.models.Helpline;
 import com.example.demo.services.ChallengeService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +42,8 @@ public class SocialController {
     private final EventRepository eventRepository;
     private final VenueRepository venueRepository;
     private final ChallengeService challengeService;
+    private final WeddingRepository weddingRepository;
+    private final HelplineRepository helplineRepository;
     
     @PostMapping("/weddings/{weddingId}/posts")
     public ResponseEntity<?> createPost(
@@ -428,6 +434,111 @@ public class SocialController {
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(new ErrorResponseDto("INTERNAL_ERROR", "Failed to fetch challenges"));
+        }
+    }
+
+    // Helplines (multiple)
+    @GetMapping("/weddings/{weddingId}/helplines")
+    public ResponseEntity<?> listHelplines(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String weddingId
+    ) {
+        try {
+            UUID wId = UUID.fromString(weddingId);
+            var list = helplineRepository.findByWeddingIdOrderByCreatedAtDesc(wId);
+            java.util.List<HelplineDto> out = new java.util.ArrayList<>();
+            for (Helpline h : list) {
+                out.add(new HelplineDto(h.getId(), h.getTitle(), h.getDescription(), h.getPhone(), h.getEmail(), h.getCreatedAt(), h.getUpdatedAt()));
+            }
+            return ResponseEntity.ok(out);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ErrorResponseDto("INTERNAL_ERROR", "Failed to fetch helplines"));
+        }
+    }
+
+    @PostMapping("/weddings/{weddingId}/helplines")
+    public ResponseEntity<?> createHelpline(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String weddingId,
+            @Valid @RequestBody HelplineDto request
+    ) {
+        try {
+            String token = authHeader.replace("Bearer ", "");
+            String userId = jwtIssuer.getUserIdFromToken(token);
+            UUID wId = UUID.fromString(weddingId);
+            var m = weddingMemberRepository.findByWeddingIdAndUserId(wId, UUID.fromString(userId));
+            if (m.isEmpty() || m.get().getRole() != com.example.demo.models.MemberRole.ADMIN) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponseDto("FORBIDDEN", "Not authorized"));
+            }
+            Helpline h = new Helpline();
+            h.setWeddingId(wId);
+            h.setTitle(request.getTitle());
+            h.setDescription(request.getDescription());
+            h.setPhone(request.getPhone());
+            h.setEmail(request.getEmail());
+            var saved = helplineRepository.save(h);
+            return ResponseEntity.ok(new HelplineDto(saved.getId(), saved.getTitle(), saved.getDescription(), saved.getPhone(), saved.getEmail(), saved.getCreatedAt(), saved.getUpdatedAt()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ErrorResponseDto("INTERNAL_ERROR", "Failed to create helpline"));
+        }
+    }
+
+    @PutMapping("/weddings/{weddingId}/helplines/{id}")
+    public ResponseEntity<?> updateHelpline(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String weddingId,
+            @PathVariable String id,
+            @Valid @RequestBody HelplineDto request
+    ) {
+        try {
+            String token = authHeader.replace("Bearer ", "");
+            String userId = jwtIssuer.getUserIdFromToken(token);
+            UUID wId = UUID.fromString(weddingId);
+            var m = weddingMemberRepository.findByWeddingIdAndUserId(wId, UUID.fromString(userId));
+            if (m.isEmpty() || m.get().getRole() != com.example.demo.models.MemberRole.ADMIN) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponseDto("FORBIDDEN", "Not authorized"));
+            }
+            var h = helplineRepository.findById(UUID.fromString(id)).orElseThrow();
+            if (!h.getWeddingId().equals(wId)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponseDto("FORBIDDEN", "Not authorized"));
+            }
+            h.setTitle(request.getTitle());
+            h.setDescription(request.getDescription());
+            h.setPhone(request.getPhone());
+            h.setEmail(request.getEmail());
+            var saved = helplineRepository.save(h);
+            return ResponseEntity.ok(new HelplineDto(saved.getId(), saved.getTitle(), saved.getDescription(), saved.getPhone(), saved.getEmail(), saved.getCreatedAt(), saved.getUpdatedAt()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ErrorResponseDto("INTERNAL_ERROR", "Failed to update helpline"));
+        }
+    }
+
+    @DeleteMapping("/weddings/{weddingId}/helplines/{id}")
+    public ResponseEntity<?> deleteHelpline(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String weddingId,
+            @PathVariable String id
+    ) {
+        try {
+            String token = authHeader.replace("Bearer ", "");
+            String userId = jwtIssuer.getUserIdFromToken(token);
+            UUID wId = UUID.fromString(weddingId);
+            var m = weddingMemberRepository.findByWeddingIdAndUserId(wId, UUID.fromString(userId));
+            if (m.isEmpty() || m.get().getRole() != com.example.demo.models.MemberRole.ADMIN) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponseDto("FORBIDDEN", "Not authorized"));
+            }
+            var h = helplineRepository.findById(UUID.fromString(id)).orElseThrow();
+            if (!h.getWeddingId().equals(wId)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponseDto("FORBIDDEN", "Not authorized"));
+            }
+            helplineRepository.delete(h);
+            return ResponseEntity.ok().build();
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ErrorResponseDto("INTERNAL_ERROR", "Failed to delete helpline"));
         }
     }
 
