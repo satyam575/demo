@@ -291,6 +291,39 @@ public class S3Service {
                 return "";
         }
     }
+
+    public PresignedUploadResponse generatePresignedUploadUrlForKey(String objectKey, String contentType) {
+        String bucketName = awsS3Properties.getBucketName();
+        try (S3Presigner presigner = getS3Presigner()) {
+            String cacheControl = "public, max-age=31536000, immutable";
+            PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(objectKey)
+                    .contentType(contentType)
+                    .cacheControl(cacheControl)
+                    .build();
+
+            PutObjectPresignRequest presignRequest = PutObjectPresignRequest.builder()
+                    .signatureDuration(java.time.Duration.ofMinutes(15))
+                    .putObjectRequest(putObjectRequest)
+                    .build();
+
+            PresignedPutObjectRequest presignedRequest = presigner.presignPutObject(presignRequest);
+            String presignedUrl = presignedRequest.url().toString();
+
+            PresignedUploadResponse dto = new PresignedUploadResponse();
+            dto.setUploadUrl(presignedUrl);
+            dto.setObjectKey(objectKey);
+            dto.setMediaUrl(getMediaUrl(objectKey));
+            dto.setExpiration(presignedRequest.expiration());
+            dto.setContentType(contentType);
+            dto.setCacheControl(cacheControl);
+            return dto;
+        } catch (Exception e) {
+            log.error("Failed to generate presigned URL for bucket: {}, key: {}", bucketName, objectKey, e);
+            throw new RuntimeException("Failed to generate presigned URL: " + e.getMessage(), e);
+        }
+    }
     
     private String generateObjectKey(UUID weddingId, MediaType mediaType, String fileExtension) {
         String objectId = UUID.randomUUID().toString();

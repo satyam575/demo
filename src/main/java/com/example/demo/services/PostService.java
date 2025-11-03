@@ -242,7 +242,42 @@ public class PostService {
         log.info("Generated presigned upload URL for wedding {} by user {}", weddingId, userId);
         return response;
     }
-    
+
+    public com.example.demo.auth.dtos.PresignedUploadResponse generatePresignedThumbnailUrl(UUID userId, UUID weddingId, String originalObjectKey) {
+        if (!weddingService.isUserMemberOfWedding(userId, weddingId)) {
+            throw new IllegalArgumentException("User is not a member of this wedding");
+        }
+
+        if (originalObjectKey == null || originalObjectKey.isBlank()) {
+            throw new IllegalArgumentException("originalObjectKey is required");
+        }
+
+        String prefix = weddingId.toString() + "/";
+        if (!originalObjectKey.startsWith(prefix)) {
+            throw new IllegalArgumentException("originalObjectKey must start with " + prefix);
+        }
+
+        String lower = originalObjectKey.toLowerCase();
+        if (lower.contains("_thumbnail")) {
+            throw new IllegalArgumentException("originalObjectKey already appears to be a thumbnail");
+        }
+
+        // Basic image gating by extension
+        boolean looksLikeImage = lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png")
+                || lower.endsWith(".webp") || lower.endsWith(".heic") || lower.endsWith(".heif");
+        if (!looksLikeImage) {
+            throw new IllegalArgumentException("Only image originals are supported for thumbnails");
+        }
+
+        int dot = originalObjectKey.lastIndexOf('.');
+        String base = (dot > -1) ? originalObjectKey.substring(0, dot) : originalObjectKey;
+        String thumbKey = base + "_thumbnail.jpg";
+
+        com.example.demo.auth.dtos.PresignedUploadResponse resp = s3Service.generatePresignedUploadUrlForKey(
+                thumbKey, "image/jpeg");
+        log.info("Generated presigned thumbnail URL for {} -> {}", originalObjectKey, thumbKey);
+        return resp;
+    }
     public String uploadMedia(UUID userId, UUID weddingId, MultipartFile file) throws IOException {
         // Verify user is member of the wedding
         if (!weddingService.isUserMemberOfWedding(userId, weddingId)) {

@@ -417,6 +417,31 @@ public class SocialController {
         }
     }
 
+    @PostMapping("/weddings/{weddingId}/media/presigned-thumbnail")
+    public ResponseEntity<?> generatePresignedThumbnailUrl(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable String weddingId,
+            @Valid @RequestBody PresignedThumbnailRequestDto request
+    ) {
+        try {
+            String token = authHeader.replace("Bearer ", "");
+            String userId = jwtIssuer.getUserIdFromToken(token);
+
+            PresignedUploadResponse response = postService.generatePresignedThumbnailUrl(
+                    UUID.fromString(userId),
+                    UUID.fromString(weddingId),
+                    request.getOriginalObjectKey()
+            );
+            return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException e) {
+            ErrorResponseDto error = new ErrorResponseDto("PRESIGNED_THUMBNAIL_ERROR", e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        } catch (Exception e) {
+            ErrorResponseDto error = new ErrorResponseDto("INTERNAL_ERROR", "An unexpected error occurred");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
     // Challenges
     @GetMapping("/weddings/{weddingId}/challenges")
     public ResponseEntity<?> listChallenges(
