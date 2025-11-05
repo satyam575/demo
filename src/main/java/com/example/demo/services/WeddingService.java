@@ -109,6 +109,22 @@ public class WeddingService {
         log.info("Created wedding {} with code {}", savedWedding.getId(), code);
         return savedWedding;
     }
+
+    @Transactional
+    public Wedding createWedding(java.util.UUID creatorUserId, String code, String title, String partner1, String partner2, String coverImageUrl) {
+        Wedding wedding = createWedding(code, title, partner1, partner2, coverImageUrl);
+        // Add creator as ADMIN and ACCEPTED member
+        WeddingMember owner = new WeddingMember(
+                wedding.getId(),
+                creatorUserId,
+                null, // displayName optional
+                MemberRole.ADMIN,
+                MemberStatus.ACCEPTED
+        );
+        weddingMemberRepository.save(owner);
+        log.info("Added creator {} as ADMIN member {} to wedding {}", creatorUserId, owner.getId(), wedding.getId());
+        return wedding;
+    }
     
     @Transactional
     public void deleteWedding(UUID weddingId, UUID userId) {

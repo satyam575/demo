@@ -78,13 +78,13 @@ public class SocialController {
     @GetMapping("/weddings/{weddingId}/members")
     public ResponseEntity<?> getWeddingMembers(
             @RequestHeader("Authorization") String authHeader,
-            @PathVariable String weddingId) {
+            @PathVariable java.util.UUID weddingId) {
         try {
             String token = authHeader.replace("Bearer ", "");
             String userId = jwtIssuer.getUserIdFromToken(token);
 
             var members = weddingMemberRepository.findByWeddingIdAndStatus(
-                    java.util.UUID.fromString(weddingId), MemberStatus.ACCEPTED);
+                    weddingId, MemberStatus.ACCEPTED);
 
             java.util.List<WeddingMemberDto> result = new java.util.ArrayList<>();
             for (WeddingMember wm : members) {
@@ -100,6 +100,10 @@ public class SocialController {
             log.info("Retrieved {} members for wedding {} by user {}", result.size(), weddingId, userId);
             return ResponseEntity.ok(result);
 
+        } catch (IllegalArgumentException e) {
+            log.error("Invalid wedding id: {}", weddingId, e);
+            ErrorResponseDto error = new ErrorResponseDto("INVALID_WEDDING_ID", "Wedding id must be a valid UUID");
+            return ResponseEntity.badRequest().body(error);
         } catch (Exception e) {
             log.error("Unexpected error in getting wedding members", e);
             ErrorResponseDto error = new ErrorResponseDto("INTERNAL_ERROR", "An unexpected error occurred");

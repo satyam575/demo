@@ -230,8 +230,9 @@ public class AuthController {
             String token = authHeader.replace("Bearer ", "");
             String userId = jwtIssuer.getUserIdFromToken(token);
 
-            // Create wedding
+            // Create wedding and add creator as ADMIN member
             com.example.demo.models.Wedding wedding = weddingService.createWedding(
+                    java.util.UUID.fromString(userId),
                     request.getCode(),
                     request.getTitle(),
                     request.getPartner1(),
