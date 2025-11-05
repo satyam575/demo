@@ -1,13 +1,15 @@
 FROM eclipse-temurin:21-jre
 WORKDIR /app
 
-# Optional: run as non-root user
-RUN addgroup --system app && adduser --system --ingroup app app
-USER app
+# Create non-root user and prepare writable dirs
+RUN addgroup --system app && adduser --system --ingroup app app \
+    && mkdir -p /app/config /app/bin \
+    && chown -R app:app /app
 
-# Copy the pre-built jar from local build output
-# Build first: mvn -DskipTests package
-COPY target/*.jar app.jar
+# Copy artifacts with correct ownership
+COPY --chown=app:app target/*.jar /app/app.jar
+COPY --chown=app:app entrypoint.sh /app/bin/entrypoint.sh
+RUN chmod +x /app/bin/entrypoint.sh
 
 # Sensible JVM defaults for containers
 ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -Djava.security.egd=file:/dev/./urandom"
@@ -16,5 +18,10 @@ ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -Djava.security.egd=file:/dev/./u
 ENV PORT=8080
 EXPOSE 8080
 
-# Expand PORT at runtime and start the app
-CMD ["sh","-c","exec java -Dserver.port=${PORT:-8080} -jar app.jar"]
+# Spring will import optional secrets file if present
+ENV SPRING_CONFIG_IMPORT=optional:file:/app/config/secrets.yml
+
+# Drop privileges
+USER app
+
+ENTRYPOINT ["/app/bin/entrypoint.sh"]

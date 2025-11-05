@@ -1,6 +1,7 @@
 package com.example.demo.services;
 
 import com.example.demo.config.WebPushProperties;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import nl.martijndwars.webpush.Notification;
@@ -20,13 +21,18 @@ public class WebPushService {
     private final WebPushProperties webPushProperties;
 
     private PushService getPushService() throws GeneralSecurityException {
+        String publicKey = webPushProperties.getPublicKey();
+        String privateKey = webPushProperties.getPrivateKey();
+        if (publicKey == null || publicKey.isBlank() || privateKey == null || privateKey.isBlank()) {
+            throw new GeneralSecurityException("Missing VAPID keys: ensure webpush.publicKey and webpush.privateKey are configured (profile/env)");
+        }
         if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
             Security.addProvider(new BouncyCastleProvider());
         }
         PushService pushService = new PushService();
         pushService.setSubject(webPushProperties.getSubject());
-        pushService.setPublicKey(Utils.loadPublicKey(webPushProperties.getPublicKey()));
-        pushService.setPrivateKey(Utils.loadPrivateKey(webPushProperties.getPrivateKey()));
+        pushService.setPublicKey(Utils.loadPublicKey(publicKey));
+        pushService.setPrivateKey(Utils.loadPrivateKey(privateKey));
         return pushService;
     }
 
@@ -38,5 +44,11 @@ public class WebPushService {
             log.error("Failed to send web push", e);
         }
     }
-}
 
+    @PostConstruct
+    public void logConfigPresence() {
+        boolean hasPub = webPushProperties.getPublicKey() != null && !webPushProperties.getPublicKey().isBlank();
+        boolean hasPriv = webPushProperties.getPrivateKey() != null && !webPushProperties.getPrivateKey().isBlank();
+        log.info("WebPush configured: publicKey={}, privateKey={}, subjectPresent={}", hasPub, hasPriv, webPushProperties.getSubject() != null);
+    }
+}
