@@ -20,6 +20,7 @@ import reactor.core.publisher.Mono;
 import com.example.demo.auth.dtos.PresignedUploadRequestDto;
 import com.example.demo.auth.dtos.PresignedUploadResponse;
 import com.example.demo.auth.dtos.PresignedThumbnailRequestDto;
+import com.example.demo.auth.dtos.AvatarPresignRequestDto;
 
 @Slf4j
 @RestController
@@ -203,20 +204,12 @@ public class AuthController {
     @PostMapping("/profile/avatar/presigned-url")
     public ResponseEntity<?> generateAvatarPresignedUrl(
             @RequestHeader("Authorization") String authHeader,
-            @Valid @RequestBody PresignedUploadRequestDto request
+            @Valid @RequestBody AvatarPresignRequestDto request
     ) {
         try {
             String token = authHeader.replace("Bearer ", "");
             String userId = jwtIssuer.getUserIdFromToken(token);
             java.util.UUID uid = java.util.UUID.fromString(userId);
-            java.util.UUID wId = java.util.UUID.fromString(request.getWeddingId());
-
-            // Verify membership (accepted)
-            boolean isMember = weddingMemberRepository.existsByWeddingIdAndUserIdAndStatus(wId, uid, MemberStatus.ACCEPTED);
-            if (!isMember) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                        .body(new ErrorResponseDto("FORBIDDEN", "User is not a member of this wedding"));
-            }
 
             String ct = request.getContentType();
             if (ct == null || !ct.startsWith("image/")) {
@@ -224,7 +217,7 @@ public class AuthController {
             }
 
             String ext = getFileExtensionFromContentTypeSafe(ct);
-            String basePath = wId.toString() + "/assets/avatars/" + uid.toString();
+            String basePath = "users/" + uid.toString() + "/avatar";
             String originalKey = basePath + "/avatar" + ext;
 
             PresignedUploadResponse resp = s3Service.generatePresignedUploadUrlForKey(originalKey, ct);
@@ -241,28 +234,19 @@ public class AuthController {
     @PostMapping("/profile/avatar/presigned-thumbnail")
     public ResponseEntity<?> generateAvatarPresignedThumbnail(
             @RequestHeader("Authorization") String authHeader,
-            @RequestParam("weddingId") String weddingId,
             @Valid @RequestBody PresignedThumbnailRequestDto request
     ) {
         try {
             String token = authHeader.replace("Bearer ", "");
             String userId = jwtIssuer.getUserIdFromToken(token);
             java.util.UUID uid = java.util.UUID.fromString(userId);
-            java.util.UUID wId = java.util.UUID.fromString(weddingId);
-
-            // Verify membership
-            boolean isMember = weddingMemberRepository.existsByWeddingIdAndUserIdAndStatus(wId, uid, MemberStatus.ACCEPTED);
-            if (!isMember) {
-                return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                        .body(new ErrorResponseDto("FORBIDDEN", "User is not a member of this wedding"));
-            }
 
             String originalKey = request.getOriginalObjectKey();
             if (originalKey == null || originalKey.isBlank()) {
                 return ResponseEntity.badRequest().body(new ErrorResponseDto("INVALID_ARGUMENT", "originalObjectKey required"));
             }
-            // Ensure key belongs to this wedding and user assets path
-            String expectedPrefix = wId.toString() + "/assets/avatars/" + uid.toString() + "/";
+            // Ensure key belongs to this user avatar path
+            String expectedPrefix = "users/" + uid.toString() + "/avatar/";
             if (!originalKey.startsWith(expectedPrefix)) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN)
                         .body(new ErrorResponseDto("FORBIDDEN", "Not allowed for this objectKey"));
