@@ -8,6 +8,8 @@ import com.example.demo.models.User;
 import com.example.demo.services.UserService;
 import com.example.demo.services.WeddingService;
 import com.example.demo.services.S3Service;
+import com.example.demo.repositories.WeddingMemberRepository;
+import com.example.demo.models.MemberStatus;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,6 +17,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
+import com.example.demo.auth.dtos.PresignedUploadRequestDto;
+import com.example.demo.auth.dtos.PresignedUploadResponse;
+import com.example.demo.auth.dtos.PresignedThumbnailRequestDto;
 
 @Slf4j
 @RestController
@@ -27,6 +32,7 @@ public class AuthController {
     private final JwtIssuer jwtIssuer;
     private final WeddingService weddingService;
     private final S3Service s3Service;
+    private final WeddingMemberRepository weddingMemberRepository;
 
     @PostMapping("/otp/request")
     public Mono<ResponseEntity<?>> requestOtp(@Valid @RequestBody OtpRequestDto request) {
@@ -137,9 +143,30 @@ public class AuthController {
             String token = authHeader.replace("Bearer ", "");
             String userId = jwtIssuer.getUserIdFromToken(token);
 
+            // Validate username/email uniqueness if changed
+            java.util.UUID uid = java.util.UUID.fromString(userId);
+            var existingOpt = userService.getUserById(uid);
+            if (existingOpt.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body(new ErrorResponseDto("USER_NOT_FOUND", "User not found"));
+            }
+            var existing = existingOpt.get();
+            if (request.getEmail() != null && !request.getEmail().equalsIgnoreCase(existing.getEmail())) {
+                if (userService.existsByEmail(request.getEmail())) {
+                    return ResponseEntity.badRequest()
+                            .body(new ErrorResponseDto("EMAIL_TAKEN", "Email is already in use"));
+                }
+            }
+            if (request.getUsername() != null && !request.getUsername().equalsIgnoreCase(existing.getUsername())) {
+                if (userService.existsByUsername(request.getUsername())) {
+                    return ResponseEntity.badRequest()
+                            .body(new ErrorResponseDto("USERNAME_TAKEN", "Username is already taken"));
+                }
+            }
+
             // Update user profile
             User updatedUser = userService.updateUser(
-                    java.util.UUID.fromString(userId),
+                    uid,
                     request.getName(),
                     request.getEmail(),
                     request.getUsername(),
@@ -168,6 +195,113 @@ public class AuthController {
             log.error("Unexpected error in profile update", e);
             ErrorResponseDto error = new ErrorResponseDto("INTERNAL_ERROR", "An unexpected error occurred");
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    // Removed server-side avatar upload; presigned flow is the default now.
+
+    @PostMapping("/profile/avatar/presigned-url")
+    public ResponseEntity<?> generateAvatarPresignedUrl(
+            @RequestHeader("Authorization") String authHeader,
+            @Valid @RequestBody PresignedUploadRequestDto request
+    ) {
+        try {
+            String token = authHeader.replace("Bearer ", "");
+            String userId = jwtIssuer.getUserIdFromToken(token);
+            java.util.UUID uid = java.util.UUID.fromString(userId);
+            java.util.UUID wId = java.util.UUID.fromString(request.getWeddingId());
+
+            // Verify membership (accepted)
+            boolean isMember = weddingMemberRepository.existsByWeddingIdAndUserIdAndStatus(wId, uid, MemberStatus.ACCEPTED);
+            if (!isMember) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(new ErrorResponseDto("FORBIDDEN", "User is not a member of this wedding"));
+            }
+
+            String ct = request.getContentType();
+            if (ct == null || !ct.startsWith("image/")) {
+                return ResponseEntity.badRequest().body(new ErrorResponseDto("INVALID_CONTENT_TYPE", "Avatar must be an image"));
+            }
+
+            String ext = getFileExtensionFromContentTypeSafe(ct);
+            String basePath = wId.toString() + "/assets/avatars/" + uid.toString();
+            String originalKey = basePath + "/avatar" + ext;
+
+            PresignedUploadResponse resp = s3Service.generatePresignedUploadUrlForKey(originalKey, ct);
+            return ResponseEntity.ok(resp);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(new ErrorResponseDto("INVALID_ARGUMENT", e.getMessage()));
+        } catch (Exception e) {
+            log.error("Error generating avatar presigned URL", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ErrorResponseDto("INTERNAL_ERROR", "Failed to generate presigned URL"));
+        }
+    }
+
+    @PostMapping("/profile/avatar/presigned-thumbnail")
+    public ResponseEntity<?> generateAvatarPresignedThumbnail(
+            @RequestHeader("Authorization") String authHeader,
+            @RequestParam("weddingId") String weddingId,
+            @Valid @RequestBody PresignedThumbnailRequestDto request
+    ) {
+        try {
+            String token = authHeader.replace("Bearer ", "");
+            String userId = jwtIssuer.getUserIdFromToken(token);
+            java.util.UUID uid = java.util.UUID.fromString(userId);
+            java.util.UUID wId = java.util.UUID.fromString(weddingId);
+
+            // Verify membership
+            boolean isMember = weddingMemberRepository.existsByWeddingIdAndUserIdAndStatus(wId, uid, MemberStatus.ACCEPTED);
+            if (!isMember) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(new ErrorResponseDto("FORBIDDEN", "User is not a member of this wedding"));
+            }
+
+            String originalKey = request.getOriginalObjectKey();
+            if (originalKey == null || originalKey.isBlank()) {
+                return ResponseEntity.badRequest().body(new ErrorResponseDto("INVALID_ARGUMENT", "originalObjectKey required"));
+            }
+            // Ensure key belongs to this wedding and user assets path
+            String expectedPrefix = wId.toString() + "/assets/avatars/" + uid.toString() + "/";
+            if (!originalKey.startsWith(expectedPrefix)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(new ErrorResponseDto("FORBIDDEN", "Not allowed for this objectKey"));
+            }
+            String lower = originalKey.toLowerCase();
+            if (!(lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".gif") || lower.endsWith(".webp"))) {
+                return ResponseEntity.badRequest().body(new ErrorResponseDto("INVALID_ARGUMENT", "Only image originals are supported"));
+            }
+            if (lower.contains("_thumbnail")) {
+                return ResponseEntity.badRequest().body(new ErrorResponseDto("INVALID_ARGUMENT", "Already a thumbnail key"));
+            }
+
+            int dot = originalKey.lastIndexOf('.');
+            String base = (dot > -1) ? originalKey.substring(0, dot) : originalKey;
+            String thumbKey = base + "_thumbnail.jpg";
+
+            PresignedUploadResponse resp = s3Service.generatePresignedUploadUrlForKey(thumbKey, "image/jpeg");
+            return ResponseEntity.ok(resp);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(new ErrorResponseDto("INVALID_ARGUMENT", e.getMessage()));
+        } catch (Exception e) {
+            log.error("Error generating avatar thumbnail presigned URL", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ErrorResponseDto("INTERNAL_ERROR", "Failed to generate thumbnail presigned URL"));
+        }
+    }
+    private String getFileExtensionFromContentTypeSafe(String contentType) {
+        if (contentType == null) return ".jpg";
+        switch (contentType) {
+            case "image/jpeg":
+                return ".jpg";
+            case "image/png":
+                return ".png";
+            case "image/gif":
+                return ".gif";
+            case "image/webp":
+                return ".webp";
+            default:
+                return ".jpg";
         }
     }
 

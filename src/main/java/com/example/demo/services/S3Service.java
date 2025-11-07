@@ -183,6 +183,8 @@ public class S3Service {
     public String getPublicMediaUrl(String objectKey) {
         return awsS3Properties.getPublicUrl() + "/" + objectKey;
     }
+
+    // Removed server-side raw byte upload helper; presigned upload path is preferred.
     
     private void validateFile(MultipartFile file, MediaType mediaType) {
         if (file.isEmpty()) {

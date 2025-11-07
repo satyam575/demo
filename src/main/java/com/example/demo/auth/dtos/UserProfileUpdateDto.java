@@ -16,6 +16,7 @@ public class UserProfileUpdateDto {
     @Pattern(regexp = "^[a-zA-Z0-9_]{3,20}$", message = "Username must be 3-20 characters, alphanumeric and underscores only")
     private String username;
     
-    @Pattern(regexp = "^https?://.*\\.(jpg|jpeg|png|gif|webp)$", message = "Invalid avatar URL format")
+    // Allow any http/https URL; uploads are handled via dedicated endpoint
+    @Pattern(regexp = "^https?://.+$", message = "Invalid avatar URL format")
     private String avatarUrl;
 }
